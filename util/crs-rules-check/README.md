@@ -48,6 +48,8 @@ Second, the script loops over each of the parsed structures. Each iteration cons
     * the variable is an operator argument, eg `SecRule ARGS "@rx %{TX.foo}"...`
     * the variable is a right hand side operand in a `setvar` action, eg `setvar:tx.bar=%{tx.foo}`
     * the variable is in an expansion, e.g., as part of the value of a `msg` action: `msg:'Current value of variable: %{tx.foo}`
+* **Check rule tags** - only tags listed in `util/APPROVED_TAGS` may be used as tags in rules
+    * to use a new tag on a rule, it **must** first be registered in the util/APPROVED_TAGS file
 
 Finally, the script prints a report of all unused TX variables. Usually, unused TX variables occur when a rule creates a TX variable (e.g., `setvar:tx.foo=1`) but the value of the variable is never used anywhere else. This will only be revealed after the script has checked all rules.
 
@@ -68,7 +70,7 @@ Optionally, you can add the option `--output=github` (default value is `native`)
 ./util/crs-rules-check/rules-check.py --output=github -r crs-setup.conf.example -r rules/*.conf
 ```
 
-In this case, each line will have a prefix, which could be `::debug` or `::error`. See [this](https://docs.github.com/en/actions/learn-github-actions/workflow-commands-for-github-actions#setting-an-error-message).
+In this case, each line will have a prefix, which could be `::debug` or `::error`. See [this](https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions#setting-an-error-message).
 
 Examples
 ========

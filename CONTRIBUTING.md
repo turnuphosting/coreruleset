@@ -16,7 +16,7 @@
 
 ## Making Changes
 
-* Base any changes on the latest dev branch (e.g., `v4.0/dev`).
+* Base any changes on branch `main`.
 * Create a topic branch for each new contribution.
 * Fix only one problem at a time. This helps to quickly test and merge submitted changes. If intending to fix *multiple unrelated problems* then use a separate branch for each problem.
 * Make commits of logical units.
@@ -34,9 +34,10 @@
 * Files must end with a single newline character.
 * No trailing whitespace at EOL.
 * No trailing blank lines at EOF (only the required single EOF newline character is allowed).
-* Add comments where possible and clearly explain any new rules.
 * Adhere to an 80 character line length limit where possible.
-* All [chained rules](https://github.com/SpiderLabs/ModSecurity/wiki/Reference-Manual-%28v2.x%29#chain) should be indented like so, for readability:
+* Add comments where possible and clearly explain any new rules.
+* Comments must not appear between chained rules and should instead be placed before the start of a rule chain.
+* All [chained rules](https://github.com/owasp-modsecurity/ModSecurity/wiki/Reference-Manual-(v2.x)#chain) should be indented like so, for readability:
 ```
 SecRule .. .. \
     "..."
@@ -91,6 +92,7 @@ instead of
 ```
 SecRule ARGS "foo" "id:1,phase:1,pass,t:none"
 ```
+ * Only the tags listed in the [util/APPROVED_TAGS](util/APPROVED_TAGS) file can be added to a rule. If you want to add a new tag, you **must** add it to this file.
 
 ## Variable Naming Conventions
 
@@ -108,18 +110,26 @@ SecRule ARGS "foo" "id:1,phase:1,pass,t:none"
 CRS uses `\x5c` to represent the backslash `\` character in regular expressions. Some of the reasons for this are:
 
 * It's portable across web servers and WAF engines: it works with Apache, Nginx, and Coraza.
-* It works with the `regexp-assemble.py` script for building optimized regular expressions.
+* It works with the [crs-toolchain](https://coreruleset.org/docs/development/crs_toolchain/) for building optimized regular expressions.
 
 The older style of representing a backslash using the character class `[\\\\]` must _not_ be used. This was previously used in CRS to get consistent results between Apache and Nginx, owing to a quirk with how Apache would "double un-escape" character escapes. For future reference, the decision was made to stop using this older method because:
 
 * It can be confusing and difficult to understand how it works.
-* It doesn't work with the `regexp-assemble.py` script.
+* It doesn't work with [crs-toolchain](https://coreruleset.org/docs/development/crs_toolchain/).
 * It doesn't work with Coraza.
 * It isn't obvious how to use it in a character class, e.g., `[a-zA-Z<portable-backslash>]`.
 
+### Forward Slash Representation
+
+CRS uses literal, *unescaped* forward slash `/` characters in regular expressions.
+
+Regular expression engines and libraries based on PCRE use the forward slash `/` character as the default delimiter. As such, forward slashes are often escaped in regular expression patterns. In the interests of readability, CRS does *not* escape forward slashes in regular expression patterns, which may seem unusual at first to new contributors.
+
+If testing a CRS regular expression using a third party tool, it may be useful to change the delimiter to something other than `/` if a testing tool raises errors because a CRS pattern features unescaped forward slashes.
+
 ### When and Why to Anchor Regular Expressions
 
-Engines running the OWASP Core Rule Set will use regular expressions to _search_ the input string, i.e., the regular expression engine is asked to find the first match in the input string. If an expression needs to match the entire input then the expression must be anchored appropriately.
+Engines running the OWASP CRS will use regular expressions to _search_ the input string, i.e., the regular expression engine is asked to find the first match in the input string. If an expression needs to match the entire input then the expression must be anchored appropriately.
 
 #### Beginning of String Anchor (^)
 
@@ -173,7 +183,7 @@ It is sometimes necessary to match the entire input string to ensure that it _ex
 
 Other anchors apart from `^` caret and `$` dollar exist, such as `\A`, `\G`, and `\Z` in PCRE. CRS **strongly discourages** the use of other anchors for the following reasons:
 
-- Not all regular expression engines support all anchors and the OWASP Core Rule Set should be compatible with as many regular expression engines as possible.
+- Not all regular expression engines support all anchors and the OWASP CRS should be compatible with as many regular expression engines as possible.
 - Their function is sometimes not trivial.
 - They aren't well known and would require additional documentation.
 - In most cases that would justify their use the regular expression can be transformed into a form that doesn't require them, or the rule can be transformed (e.g., with an additional chain rule).
@@ -218,11 +228,17 @@ It matches some HTML attributes and then expects to see `=`. Using a somewhat co
 
 To summarize: **be very mindful about when and why you use lazy quantifiers in your regular expressions**.
 
+### Possessive Quantifiers and Atomic Groups
+
+Lazy and greedy matching change the order in which a regular expression engine processes a regular expression. However, the order of execution does not influence the backtracking behavior of backtracking engines.
+
+Possessive quantifiers (e.g., `x++`) and atomic groups (e.g., `(?>x)`) are tools that can be used to prevent a backtracking engine from backtracking. They _can_ be used for performance optimization but are only supported by backtracking engines and, therefore, are not permitted in CRS rules.
+
 ### Writing Regular Expressions for Non-Backtracking Compatibility
 
 Traditional regular expression engines use backtracking to solve some additional problems, such as finding a string that is preceded or followed by another string. While this functionality can certainly come in handy and has its place in certain applications, it can also lead to performance issues and, in uncontrolled environments, open up possibilities for attacks (the term "[ReDoS](https://en.wikipedia.org/wiki/ReDoS)" is often used to describe an attack that exhausts process or system resources due to excessive backtracking).
 
-The OWASP Core Rule Set tries to be compatible with non-backtracking regular expression engines, such as RE2, because:
+The OWASP CRS tries to be compatible with non-backtracking regular expression engines, such as RE2, because:
 
 - Non-backtracking engines are less vulnerable to ReDoS attacks.
 - Non-backtracking engines can often outperform backtracking engines.
@@ -239,8 +255,30 @@ To ensure compatibility with non-backtracking regular expression engines, the fo
 - named backreferences (e.g., `(?P=name)`)
 - conditionals (e.g., `(?(regex)then|else)`)
 - recursive calls to capture groups (e.g., `(?1)`)
+- possessive quantifiers (e.g., `(?:regex)++`)
+- atomic (or possessive) groups (e.g., `(?>regex`))
 
 This list is not exhaustive but covers the most important points. The [RE2 documentation](https://github.com/google/re2/wiki/Syntax) includes a complete list of supported and unsupported features that various engines offer.
+
+### When and How to Optimize Regular Expressions
+
+Optimizing regular expressions is hard. Often, a change intended to improve the performance of a regular expression will change the original semantics by accident. In addition, optimizations usually make expressions harder to read. Consider the following example of URL schemes:
+
+```python
+mailto|mms|mumble|maven
+```
+
+An optimized version (produced by the [crs-toolchain]({{< ref "crs_toolchain" >}})) could look like this:
+
+```python
+m(?:a(?:ilto|ven)|umble|ms)
+```
+
+The above expression is an optimization because it reduces the number of backtracking steps when a branch fails. The regular expressions in the CRS are often comprised of lists of tens or even hundreds of words. Reading such an expression in an optimized form is difficult: even the _simple_ optimized example above is difficult to read.
+
+In general, contributors should not try to optimize contributed regular expressions and should instead strive for clarity. New regular expressions will usually be required to be submitted as a `.ra` file for the [crs-toolchain]({{< ref "crs_toolchain" >}}) to process. In such a file, the regular expression is decomposed into individual parts, making manual optimizations much harder or even impossible (and unnecessary with the `crs-toolchain`). The `crs-toolchain` performs some common optimizations automatically, such as the one shown above.
+
+Whether optimizations make sense in a contribution is assessed for each case individually.
 
 ## Rules Compliance with Paranoia Levels
 
@@ -265,7 +303,7 @@ The types of rules that are allowed at each paranoia level are as follows:
 
 **PL 2:**
 
-* [Chain](https://github.com/SpiderLabs/ModSecurity/wiki/Reference-Manual-%28v2.x%29#chain) usage is allowed
+* [Chain](https://github.com/owasp-modsecurity/ModSecurity/wiki/Reference-Manual-%28v2.x%29#chain) usage is allowed
 * Confirmed matches use score critical
 * Matches that cause false positives are limited to using scores notice or warning
 * Low false positive rates
@@ -327,31 +365,33 @@ The rule tests are located under `tests/regression/tests`. Each CRS rule *file* 
 
 Full documentation of the required formatting and available options of the YAML tests can be found at https://github.com/coreruleset/ftw/blob/main/docs/YAMLFormat.md.
 
+Documentation on how to run the CRS test suite can be found in the [online documentation](https://coreruleset.org/docs/development/testing/).
+
 ### Positive Tests
 
 Example of a simple *positive test*:
 
 ```yaml
-- test_title: 932100-21
-    desc: "Unix command injection"
-    stages:
-      - stage:
-          input:
-            dest_addr: 127.0.0.1
-            port: 80
-            headers:
-              Host: localhost
-              User-Agent: "OWASP CRS test agent"
-              Accept: */*
-            method: POST
-            uri: "/"
-            data: "var=` /bin/cat /etc/passwd`"
-            version: HTTP/1.0
-          output:
-            log_contains: id "932100"
+- test_title: 932230-26
+  desc: "Unix command injection"
+  stages:
+    - stage:
+        input:
+          dest_addr: 127.0.0.1
+          headers:
+            Host: localhost
+            User-Agent: "OWASP CRS test agent"
+            Accept: text/xml,application/xml,application/xhtml+xml,text/html;q=0.9,text/plain;q=0.8,image/png,*/*;q=0.5
+          method: POST
+          port: 80
+          uri: "/post"
+          data: "var=` /bin/cat /etc/passwd`"
+          version: HTTP/1.1
+        output:
+          log_contains: id "932230"
 ```
 
-This test will succeed if the log output contains `id "932100"`, which would indicate that the rule in question matched and generated an alert.
+This test will succeed if the log output contains `id "932230"`, which would indicate that the rule in question matched and generated an alert.
 
 It's important that tests consistently include the HTTP header fields `Host`, `User-Agent`, and `Accept`. CRS includes rules that detect if these headers are missing or empty, so these headers should be included in each test to avoid unnecessarily causing those rules to match. Ideally, *each positive test should cause* **only** *the rule in question to match*.
 
@@ -362,26 +402,24 @@ The rule's description field, `desc`, is important. It should describe what is b
 Example of a simple *negative test*:
 
 ```yaml
-- test_title: 932150-5
-    desc: "Natural language 'ping pong tables' should not cause FPs"
-    stages:
-      - stage:
-          input:
-            dest_addr: 127.0.0.1
-            port: 80
-            headers:
-              Host: localhost
-              User-Agent: "OWASP CRS test agent"
-              Accept: */*
-            method: POST
-            uri: "/"
-            data: "foo=ping pong tables"
-            version: HTTP/1.0
-          output:
-            no_log_contains: id "932150"
+- test_title: 932260-4
+  stages:
+    - stage:
+        input:
+          dest_addr: "127.0.0.1"
+          method: "POST"
+          port: 80
+          headers:
+            User-Agent: "OWASP CRS test agent"
+            Host: "localhost"
+            Accept: text/xml,application/xml,application/xhtml+xml,text/html;q=0.9,text/plain;q=0.8,image/png,*/*;q=0.5
+          data: 'foo=ping pong tables'
+          uri: '/post'
+        output:
+          no_log_contains: id "932260"
 ```
 
-This test will succeed if the log output does **not** contain `id "932150"`, which would indicate that the rule in question did **not** match and so did **not** generate an alert.
+This test will succeed if the log output does **not** contain `id "932260"`, which would indicate that the rule in question did **not** match and so did **not** generate an alert.
 
 ### Encoded and Raw Requests
 
@@ -401,6 +439,22 @@ encoded_request: "R0VUIFwgSFRUUA0KDQoK"
 where `R0VUIFwgSFRUUA0KDQoK` is the base64-encoded equivalent of `GET \ HTTP\r\n\r\n`.
 
 The older method of using `raw_request` is deprecated as it's difficult to maintain and less portable than `encoded_request`.
+
+### Using The Correct HTTP Endpoint
+
+The CRS project uses [kennthreitz/httpbin](https://hub.docker.com/r/kennethreitz/httpbin) as the backend server for tests. This backend provides one dedicated endpoint for each HTTP method. Tests should target these endpoints to:
+
+- improve test throughput (prevent HTML from being returned by the backend)
+- add automatic HTTP method verification (the backend will respond with status code `405` (method not allowed) to requests whose method does not match the endpoint)
+
+Test URIs should be structured as follows, where `<method>` must be replaced by the name of the HTTP method the test uses:
+
+```yaml
+#...
+          method: <method>
+          uri: /<method>/some/arbitrary/url
+#...
+```
 
 ## Further Guidance on Rule Writing
 

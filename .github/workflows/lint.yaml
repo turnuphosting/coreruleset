@@ -1,4 +1,3 @@
----
 name: Lint
 
 on: [push, pull_request]
@@ -6,12 +5,9 @@ on: [push, pull_request]
 jobs:
   check-syntax:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: true
-    # check why is failing and change afterwards
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Lint Yaml
         uses: ibiqlik/action-yamllint@v3
@@ -39,7 +35,7 @@ jobs:
         run: |
           pip install --upgrade setuptools
           pip install -r ./util/crs-rules-check/requirements.txt
-          ./util/crs-rules-check/rules-check.py --output=github -r crs-setup.conf.example -r rules/*.conf
+          ./util/crs-rules-check/rules-check.py --output=github -r crs-setup.conf.example -r rules/*.conf -t util/APPROVED_TAGS
 
       - name: "Find rules without test"
         run: |
